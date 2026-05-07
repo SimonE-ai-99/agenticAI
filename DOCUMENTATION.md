@@ -1,6 +1,6 @@
 # Trend Scout — Project Documentation
 
-**A multi-agent trend-briefing generator for DRYKORN**
+**A multi-agent trend-briefing generator for premium-fashion brands**
 
 | | |
 |---|---|
@@ -54,7 +54,7 @@ This document tells the story along the six stations of the **Agentic Developmen
 
 ## Station 1 — Goal Definition
 
-DRYKORN's trend team produces seasonal trend briefings manually. Friction:
+Fashion trend teams produce seasonal trend briefings manually. Friction:
 
 - Sources are scattered: Vogue, Pinterest, Pantone, Business of Fashion, competitor lookbooks.
 - Manual research takes 4–8 hours per briefing.
@@ -113,7 +113,7 @@ DRYKORN's trend team produces seasonal trend briefings manually. Friction:
 | NF3 | Free tier of the chosen API is sufficient for development & demo | ✓ |
 | NF4 | Pragmatic module layout — coarse files by topic, not micro-split | ✓ (7-file split) |
 | NF5 | Light- and dark-mode support | ✓ |
-| NF6 | DRYKORN-on-brand visual identity (monochrome, editorial, Inter font) | ✓ |
+| NF6 | Editorial visual identity (monochrome, Inter font) | ✓ |
 | NF7 | Hot-reload on code change for fast iteration | ✓ (Streamlit `runOnSave`) |
 
 ### Out of scope
@@ -148,7 +148,7 @@ Eight LLM-driven roles, each with its own system prompt. They share the same Gem
 | **Runway** | Editorial fashion | Vogue, Business of Fashion, Fashion Weeks | Silhouettes, materials, styling cues |
 | **Social** | Mainstream / youth | TikTok, Pinterest, Instagram | Aesthetics, hashtags, micro-trends |
 | **Color** | Forecasting | Pantone, WGSN | Hex codes + rationale |
-| **Competitor** | Positioning | Closed, Marc O'Polo (DRYKORN-tier) | Collection strategies, assortment focus |
+| **Competitor** | Positioning | Closed, Marc O'Polo, COS, Arket | Collection strategies, assortment focus |
 | **(custom)** | User-defined | User-defined | Sustainability, Material Innovation, Regional Market, … |
 
 The four defaults give one editorial / one social / one craft / one competitive — independent, non-overlapping perspectives. Custom agents extend the topology at runtime through the HITL gate.
@@ -387,6 +387,8 @@ Open http://localhost:8501.
 - Streamlit docs: https://docs.streamlit.io
 - Open Graph protocol: https://ogp.me/
 
-**Brands referenced:**
-- DRYKORN (target): https://www.drykorn.com
-- Closed, Marc O'Polo (competitors); Vogue, Business of Fashion (editorial); Pinterest, TikTok (social); Pantone, WGSN (forecasting)
+**Brands referenced (as research targets):**
+- Closed, Marc O'Polo, COS, Arket, Filippa K, Hope (competitors)
+- Vogue, Business of Fashion, WWD (editorial)
+- Pinterest, TikTok, Instagram (social)
+- Pantone, WGSN (forecasting)

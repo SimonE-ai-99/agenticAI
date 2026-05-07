@@ -35,8 +35,8 @@ AGENTS: dict[str, str] = {
         "officially announced color forecast."
     ),
     "Competitor": (
-        "You are a Competitor Analyst for premium-casual women's fashion "
-        "(Closed, Marc O'Polo, DRYKORN tier — also COS, Arket, Filippa K, Hope). "
+        "You are a Competitor Analyst for premium-casual fashion brands "
+        "(e.g. Closed, Marc O'Polo, COS, Arket, Filippa K, Hope). "
         "For each finding, name the brand and the specific collection, capsule, "
         "or campaign (e.g., 'Closed FW26 denim capsule', not 'Closed's recent work'). "
         "Reference price-point shifts, sustainability-claims, or assortment-mix "

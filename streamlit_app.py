@@ -8,6 +8,7 @@ Run:  streamlit run streamlit_app.py
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 
@@ -15,16 +16,9 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from trend_scout.config import AGENTS, MODEL
-
-
-# Sidebar-Hints — pure UI strings, kept here so config.py stays domain-only.
-AGENT_SIDEBAR_HINTS: dict[str, str] = {
-    "Runway": "catwalks, editorials",
-    "Social": "TikTok, Pinterest, Instagram",
-    "Color": "Pantone, WGSN, forecasts",
-    "Competitor": "Closed, Marc O'Polo",
-}
-from trend_scout.export import briefing_to_html
+from trend_scout.llm import validate_input
+from trend_scout.mails import draft_emails, send_smtp_emails
+from trend_scout.pdf import briefing_to_pdf
 from trend_scout.research import run_planner
 from trend_scout.storage import (
     compute_input_hash,
@@ -43,6 +37,15 @@ from trend_scout.ui import (
     render_image_gallery,
     render_sources,
 )
+
+
+# Sidebar-Hints — pure UI strings, kept here so config.py stays domain-only.
+AGENT_SIDEBAR_HINTS: dict[str, str] = {
+    "Runway": "catwalks, editorials",
+    "Social": "TikTok, Pinterest, Instagram",
+    "Color": "Pantone, WGSN, forecasts",
+    "Competitor": "Closed, Marc O'Polo",
+}
 
 load_dotenv()
 
@@ -86,18 +89,35 @@ with st.sidebar:
         with st.expander(f"History ({len(history_records)})"):
             for rec in history_records:
                 ts = rec.get("timestamp", "")[:16].replace("T", " ")
-                label = f"{rec['season']} · {rec['target']}"
-                cols = st.columns([4, 1])
+                meta_parts: list[str] = [ts]
+                if rec.get("mode"):
+                    meta_parts.append(rec["mode"])
+                if rec.get("agents_count"):
+                    meta_parts.append(f"{rec['agents_count']} agents")
+                if rec.get("sources"):
+                    meta_parts.append(f"{rec['sources']} sources")
+                meta_line = " · ".join(meta_parts)
+
+                cols = st.columns([5, 1])
                 with cols[0]:
                     if st.button(
-                        f"{label}\n\n{ts}",
+                        f"{rec['season']} · {rec['target']}",
                         key=f"hist_load_{rec['id']}",
                         use_container_width=True,
                     ):
                         st.session_state.pending_history_load = rec["id"]
                         st.rerun()
+                    st.markdown(
+                        f'<div class="ts-history-meta">{meta_line}</div>',
+                        unsafe_allow_html=True,
+                    )
                 with cols[1]:
-                    if st.button("✕", key=f"hist_del_{rec['id']}", help="Delete"):
+                    if st.button(
+                        "✕",
+                        key=f"hist_del_{rec['id']}",
+                        help="Delete",
+                        use_container_width=True,
+                    ):
                         delete_run(rec["id"])
                         st.rerun()
 
@@ -126,7 +146,7 @@ with st.sidebar:
 
 # -------------------------------------------------------------------- Header
 
-st.markdown('<div class="ts-eyebrow">DRYKORN · Trend Briefing</div>', unsafe_allow_html=True)
+st.markdown('<div class="ts-eyebrow">Trend Briefing</div>', unsafe_allow_html=True)
 st.markdown('<h1>Trend Scout</h1>', unsafe_allow_html=True)
 st.markdown(
     '<div class="ts-meta">Planner → HITL gate → N parallel researchers '
@@ -185,6 +205,33 @@ if run_btn:
     for _agent in AGENTS:
         st.session_state.pop(f"plan_text_{_agent}", None)
         st.session_state.pop(f"plan_inc_{_agent}", None)
+
+    # Cache-Hit: gleiche (season, target, mode) Kombination wurde schon mal gerunnt
+    # → direkt das gespeicherte Briefing zeigen, Planner + Pipeline überspringen.
+    # Custom-Agents überspringen den Cache, da sie eine bewusste Erweiterung sind.
+    if use_cache and not st.session_state.custom_agents:
+        cached = find_cached(season, target, mode)
+        if cached is not None:
+            st.session_state.phase = "done"
+            st.session_state.plan = cached.get("plan")
+            st.session_state.briefing = cached.get("briefing")
+            st.session_state.outputs = cached.get("outputs", [])
+            st.session_state.tot_info = cached.get("tot_info")
+            st.session_state.run_stats = cached.get("run_stats")
+            st.session_state.enabled_agents = cached.get("enabled_agents", [])
+            st.rerun()
+
+    # Input guardrail: blocks gibberish, off-topic, prompt-injection. Cache-Hits
+    # don't reach this point (already validated when first stored).
+    try:
+        with st.spinner("Validating inputs ..."):
+            verdict = asyncio.run(validate_input(season, target, MODEL))
+    except Exception:
+        verdict = {"valid": True, "reason": ""}
+    if not verdict.get("valid", True):
+        reason = verdict.get("reason") or "Inputs were rejected by the guardrail."
+        st.error(f"Input rejected: {reason}")
+        st.stop()
 
     try:
         with st.spinner("Planner agent decomposing the request ..."):
@@ -372,19 +419,7 @@ if st.session_state.phase == "planned":
             render()
 
         max_rounds = 2 if mode == "Fast" else 6
-        input_hash = compute_input_hash(season, target, agent_specs)
-
-        # Cache-Hit: serve the most recent matching run, no API call.
-        if use_cache:
-            cached = find_cached(input_hash)
-            if cached is not None:
-                st.session_state.briefing = cached.get("briefing")
-                st.session_state.outputs = cached.get("outputs", [])
-                st.session_state.tot_info = cached.get("tot_info")
-                st.session_state.run_stats = cached.get("run_stats")
-                st.session_state.phase = "done"
-                status.update(label="Loaded from cache.", state="complete")
-                st.rerun()
+        input_hash = compute_input_hash(season, target, mode)
 
         try:
             briefing, outputs, tot_info = asyncio.run(
@@ -479,7 +514,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-briefing_header_cols = st.columns([5, 1])
+briefing_header_cols = st.columns([4, 1, 1])
 with briefing_header_cols[0]:
     st.markdown(
         '<div class="ts-section" style="margin-top:0.5rem;">Briefing</div>',
@@ -487,86 +522,211 @@ with briefing_header_cols[0]:
     )
 with briefing_header_cols[1]:
     st.write("")
-    download_filename = f"trend_scout_{stats_season}_{stats_target}.md".replace(
+    if st.button("Share", use_container_width=True, key="share_btn"):
+        st.session_state.share_dialog_open = True
+        st.rerun()
+with briefing_header_cols[2]:
+    st.write("")
+    pdf_filename = f"trend_scout_{stats_season}_{stats_target}.pdf".replace(
         " ", "_"
     ).replace("'", "")
-    saved_plan = st.session_state.get("plan") or {}
-    enabled_agent_names = st.session_state.get("enabled_agents") or list(AGENTS.keys())
-    plan_section = ""
-    if saved_plan:
-        plan_section = "## Research plan (planner output, user-approved)\n\n"
-        for agent_name in AGENTS.keys():
-            queries = saved_plan.get(agent_name, []) or []
-            if agent_name not in enabled_agent_names:
-                plan_section += f"### {agent_name}\n_(skipped by user)_\n\n"
-                continue
-            if not queries:
-                plan_section += f"### {agent_name}\n_(no specific angles given)_\n\n"
-                continue
-            plan_section += f"### {agent_name}\n"
-            for q in queries:
-                plan_section += f"- {q}\n"
-            plan_section += "\n"
-        default_names = set(AGENTS.keys())
-        custom_in_plan = [
-            n for n in enabled_agent_names
-            if n not in default_names and n != "CrossCutting"
-        ]
-        for agent_name in custom_in_plan:
-            queries = saved_plan.get(agent_name, []) or []
-            plan_section += f"### {agent_name} _(custom)_\n"
-            if queries:
-                for q in queries:
-                    plan_section += f"- {q}\n"
-            else:
-                plan_section += "_(no specific angles given)_\n"
-            plan_section += "\n"
-        cross = saved_plan.get("CrossCutting") or []
-        if cross:
-            plan_section += "**Cross-cutting themes**\n"
-            for theme in cross:
-                plan_section += f"- {theme}\n"
-            plan_section += "\n"
-        plan_section += "---\n\n"
-    download_md = (
-        f"# Trend Scout briefing\n\n"
-        f"Season: {stats_season}\n"
-        f"Target group: {stats_target}\n\n"
-        "---\n\n"
-        + plan_section
-        + briefing_text
-        + "\n"
-    )
-    st.download_button(
-        "Download .md",
-        data=download_md,
-        file_name=download_filename,
-        mime="text/markdown",
-        use_container_width=True,
+
+
+@st.cache_data(show_spinner="Generating PDF ...", max_entries=8)
+def _build_pdf(
+    season: str,
+    target: str,
+    briefing_text: str,
+    outputs_payload: str,
+    gallery_payload: str,
+) -> bytes:
+    """Cache the PDF bytes so re-renders don't re-download all moodboard
+    images. Cache key = JSON-serialised inputs."""
+    return briefing_to_pdf(
+        season=season,
+        target=target,
+        briefing_text=briefing_text,
+        outputs=json.loads(outputs_payload),
+        gallery_images=json.loads(gallery_payload),
     )
 
-    download_html = briefing_to_html(
-        season=stats_season,
-        target=stats_target,
-        briefing_text=briefing_text,
-        outputs=outputs,
-        gallery_images=gallery_images,
+
+with briefing_header_cols[2]:
+    pdf_bytes = _build_pdf(
+        stats_season,
+        stats_target,
+        briefing_text,
+        json.dumps(outputs),
+        json.dumps(gallery_images),
     )
-    download_html_filename = download_filename.replace(".md", ".html")
     st.download_button(
-        "Download .html (print to PDF)",
-        data=download_html,
-        file_name=download_html_filename,
-        mime="text/html",
+        "Download PDF",
+        data=pdf_bytes,
+        file_name=pdf_filename,
+        mime="application/pdf",
         use_container_width=True,
-        help="Open in a browser, then File → Print → Save as PDF for a "
-        "printable version with the moodboard images embedded.",
+        key="download_pdf_btn",
     )
+
 
 with st.container(border=True):
     render_briefing_card(briefing_text)
 
 render_image_gallery(gallery_images)
+
+
+# -------------------------------------------------------------------- Share dialog (mail agent + HITL)
+
+
+@st.dialog("Share via email", width="large")
+def share_dialog() -> None:
+    """Mail-agent pop-up: collect recipients (email + name + role + language),
+    let the LLM draft personalized emails, allow the user to edit each draft,
+    then trigger a dummy send action gated behind an explicit approve click."""
+    state_briefing = st.session_state.get("briefing") or ""
+    state_season = (st.session_state.get("run_stats") or {}).get("season", "")
+    state_target = (st.session_state.get("run_stats") or {}).get("target", "")
+
+    if "mail_recipients" not in st.session_state:
+        st.session_state.mail_recipients = [{"email": "", "name": "", "role": ""}]
+    if "mail_drafts" not in st.session_state:
+        st.session_state.mail_drafts = []
+
+    # Stage 1: recipient form
+    st.markdown(
+        '<div class="ts-eyebrow" style="margin-bottom:0.4rem;">Recipients</div>',
+        unsafe_allow_html=True,
+    )
+    for i, r in enumerate(st.session_state.mail_recipients):
+        cols = st.columns([3, 2, 2, 0.5])
+        with cols[0]:
+            r["email"] = st.text_input(
+                "Email", value=r.get("email", ""), key=f"mr_email_{i}",
+                placeholder="name@company.com", label_visibility="collapsed",
+            )
+        with cols[1]:
+            r["name"] = st.text_input(
+                "Name", value=r.get("name", ""), key=f"mr_name_{i}",
+                placeholder="First name", label_visibility="collapsed",
+            )
+        with cols[2]:
+            r["role"] = st.text_input(
+                "Role", value=r.get("role", ""), key=f"mr_role_{i}",
+                placeholder="Marketing / Buying / …", label_visibility="collapsed",
+            )
+        with cols[3]:
+            if len(st.session_state.mail_recipients) > 1:
+                if st.button("✕", key=f"mr_rm_{i}", help="Remove recipient"):
+                    st.session_state.mail_recipients.pop(i)
+                    st.session_state.mail_drafts = []
+                    st.rerun()
+
+    add_col, lang_col = st.columns([1, 2])
+    with add_col:
+        if st.button("+ Add recipient", key="mr_add", use_container_width=True):
+            st.session_state.mail_recipients.append({"email": "", "name": "", "role": ""})
+            st.rerun()
+    with lang_col:
+        language = st.selectbox(
+            "Language",
+            ["English", "Deutsch", "Français", "Italiano", "Español"],
+            index=1,
+            key="mr_language",
+        )
+
+    # Stage 2: generate
+    valid_recipients = [
+        r for r in st.session_state.mail_recipients
+        if r.get("email", "").strip()
+    ]
+    invalid_emails = [
+        r["email"] for r in valid_recipients
+        if not _email_format_ok(r["email"])
+    ]
+    can_generate = bool(valid_recipients) and not invalid_emails
+    if invalid_emails:
+        st.error(f"Invalid email format: {', '.join(invalid_emails)}")
+
+    st.write("")
+    if st.button(
+        "Generate emails",
+        type="primary",
+        disabled=not can_generate,
+        use_container_width=True,
+        key="mr_generate",
+    ):
+        try:
+            with st.spinner("Mail agent drafting emails ..."):
+                drafts = asyncio.run(draft_emails(
+                    briefing=state_briefing,
+                    season=state_season,
+                    target=state_target,
+                    language=language,
+                    recipients=valid_recipients,
+                ))
+            st.session_state.mail_drafts = drafts
+            st.rerun()
+        except Exception as e:
+            st.error(f"Mail agent error: {e}")
+
+    # Stage 3: review + edit
+    drafts = st.session_state.mail_drafts or []
+    if drafts:
+        st.markdown('<hr class="ts-rule"/>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="ts-eyebrow" style="margin-bottom:0.5rem;">'
+            'Drafts — review and edit before sending</div>',
+            unsafe_allow_html=True,
+        )
+        for i, d in enumerate(drafts):
+            with st.container(border=True):
+                st.markdown(
+                    f'<div class="ts-eyebrow" style="margin:0 0 0.4rem 0;">'
+                    f'To: {d.get("email", "")}</div>',
+                    unsafe_allow_html=True,
+                )
+                d["subject"] = st.text_input(
+                    "Subject", value=d.get("subject", ""), key=f"md_subj_{i}",
+                )
+                d["body"] = st.text_area(
+                    "Body", value=d.get("body", ""), key=f"md_body_{i}", height=220,
+                )
+
+        send_col, cancel_col = st.columns([2, 1])
+        with send_col:
+            if st.button(
+                "Approve and send",
+                type="primary",
+                use_container_width=True,
+                key="mr_send",
+            ):
+                result = send_smtp_emails(drafts)
+                st.session_state.share_dialog_open = False
+                st.session_state.mail_drafts = []
+                st.toast(
+                    f"Sent {result['count']} email(s) (dummy action).",
+                    icon="✅",
+                )
+                st.rerun()
+        with cancel_col:
+            if st.button("Cancel", use_container_width=True, key="mr_cancel"):
+                st.session_state.share_dialog_open = False
+                st.session_state.mail_drafts = []
+                st.rerun()
+    else:
+        if st.button("Close", use_container_width=True, key="mr_close"):
+            st.session_state.share_dialog_open = False
+            st.rerun()
+
+
+def _email_format_ok(addr: str) -> bool:
+    """Local mirror of mails.is_valid_email so the dialog body stays self-contained."""
+    import re as _re
+    return bool(_re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", (addr or "").strip()))
+
+
+if st.session_state.get("share_dialog_open"):
+    share_dialog()
 
 
 # Tree of Thought — 3 full briefing drafts evaluated, the chosen one is rendered above

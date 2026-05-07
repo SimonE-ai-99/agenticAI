@@ -4,9 +4,10 @@ image validation.
 After picking the winning briefing, a critic LLM reads it and may trigger
 one revision pass. Then og:image URLs from all agent citations are pooled,
 their bytes downloaded in parallel, and a single multimodal Gemini call
-filters them against the briefing + target group. Survivors render as the
-moodboard under the briefing card. Color cards stay text-only — hex tiles
-plus name plus code, no per-color image (those visuals live in the moodboard).
+filters them against the briefing and target group. Survivors render as
+the moodboard under the briefing card. Color cards stay text-only — hex
+tiles plus name plus code, no per-color image (those visuals live in the
+moodboard).
 """
 from __future__ import annotations
 
@@ -105,7 +106,6 @@ async def synthesize(
         f"Today's date: {today}\n"
         f"Season: {season}\n"
         f"Target group: {target}\n"
-        f"Brand: DRYKORN\n\n"
         "Frame the briefing for the relationship between today and the requested season "
         "(upcoming / current / past). Do not blur findings across season boundaries.\n\n"
     )
@@ -138,7 +138,6 @@ async def pick_best_briefing(
     user = (
         f"Season: {season}\n"
         f"Target group: {target}\n"
-        f"Brand: DRYKORN\n\n"
         f"{block}"
     )
     response = await generate_with_retry(
@@ -168,7 +167,6 @@ async def reflect_on_briefing(
         f"Today's date: {today}\n"
         f"Season: {season}\n"
         f"Target group: {target}\n"
-        f"Brand: DRYKORN\n\n"
         f"Briefing draft:\n\n{briefing}"
     )
     response = await generate_with_retry(
@@ -193,7 +191,6 @@ async def revise_briefing(
         f"Today's date: {today}\n"
         f"Season: {season}\n"
         f"Target group: {target}\n"
-        f"Brand: DRYKORN\n\n"
         f"Editor's flagged issues:\n{issues}\n\n"
         f"Current briefing draft to revise:\n\n{briefing}"
     )

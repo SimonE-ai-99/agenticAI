@@ -24,21 +24,17 @@ def _slug(text: str) -> str:
     return s[:60] or "untitled"
 
 
-def compute_input_hash(
-    season: str,
-    target: str,
-    agent_specs: list[tuple[str, str, list[str] | None]],
-) -> str:
-    """Stable hash over the user-controlled inputs that decide a run's outcome.
-    Custom-agent prompts and per-agent query lists are included so editing
-    them invalidates the cache; the season+target alone aren't enough."""
+def compute_input_hash(season: str, target: str, mode: str) -> str:
+    """Stable hash over the inputs the user actually controls before the
+    pipeline runs: season, target, and the speed/quality mode. The plan
+    (research angles) is intentionally NOT in the hash — the planner is
+    non-deterministic, so including it would bust the cache on every
+    repeat run with identical inputs. Custom agents skip the cache entirely
+    in the caller."""
     payload = {
         "season": season.strip().lower(),
         "target": target.strip().lower(),
-        "agents": [
-            {"name": n, "prompt": p, "queries": list(q or [])}
-            for n, p, q in agent_specs
-        ],
+        "mode": mode.strip().lower(),
     }
     blob = json.dumps(payload, sort_keys=True).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()[:16]
@@ -88,13 +84,17 @@ def list_runs(limit: int = 20) -> list[dict]:
     for p in files[:limit]:
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
+            stats = data.get("run_stats") or {}
             out.append({
                 "id": data.get("id", p.stem),
                 "timestamp": data.get("timestamp", ""),
                 "season": data.get("season", ""),
                 "target": data.get("target", ""),
                 "input_hash": data.get("input_hash", ""),
-                "elapsed": (data.get("run_stats") or {}).get("elapsed", 0),
+                "elapsed": stats.get("elapsed", 0),
+                "mode": stats.get("mode", ""),
+                "agents_count": len(data.get("enabled_agents") or []),
+                "sources": stats.get("sources", 0),
             })
         except Exception:
             continue
@@ -112,10 +112,19 @@ def load_run(run_id: str) -> dict | None:
         return None
 
 
-def find_cached(input_hash: str) -> dict | None:
-    """Return the most recent run whose input_hash matches, or None."""
+def find_cached(season: str, target: str, mode: str) -> dict | None:
+    """Return the most recent run for (season, target, mode), or None.
+    Matches on the canonicalized fields directly — robust to schema changes
+    in input_hash and to records that were saved before mode-tracking existed."""
+    season_l = season.strip().lower()
+    target_l = target.strip().lower()
+    mode_l = mode.strip().lower()
     for meta in list_runs(limit=50):
-        if meta.get("input_hash") == input_hash:
+        if (
+            meta.get("season", "").strip().lower() == season_l
+            and meta.get("target", "").strip().lower() == target_l
+            and meta.get("mode", "").strip().lower() == mode_l
+        ):
             full = load_run(meta["id"])
             if full:
                 return full
