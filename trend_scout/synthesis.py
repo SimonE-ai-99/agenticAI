@@ -91,6 +91,7 @@ async def synthesize(
     agent_outputs: list[dict],
     cross_cutting: list[str] | None = None,
     angle: dict | None = None,
+    brand_profile_block: str = "",
 ) -> str:
     """Aggregate per-agent reports into one Markdown briefing through one lens."""
     blocks: list[str] = []
@@ -106,6 +107,10 @@ async def synthesize(
         f"Today's date: {today}\n"
         f"Season: {season}\n"
         f"Target group: {target}\n"
+    )
+    if brand_profile_block:
+        user += f"\n{brand_profile_block}\n\n"
+    user += (
         "Frame the briefing for the relationship between today and the requested season "
         "(upcoming / current / past). Do not blur findings across season boundaries.\n\n"
     )
@@ -128,7 +133,10 @@ async def synthesize(
 
 
 async def pick_best_briefing(
-    briefings: list[str], season: str, target: str
+    briefings: list[str],
+    season: str,
+    target: str,
+    brand_profile_block: str = "",
 ) -> tuple[int, str]:
     """Tree-of-Thought picker: choose the strongest among 3 full-briefing drafts."""
     block = "\n\n--- BRIEFING SEPARATOR ---\n\n".join(
@@ -138,8 +146,10 @@ async def pick_best_briefing(
     user = (
         f"Season: {season}\n"
         f"Target group: {target}\n"
-        f"{block}"
     )
+    if brand_profile_block:
+        user += f"\n{brand_profile_block}\n\n"
+    user += block
     response = await generate_with_retry(
         model=MODEL,
         contents=user,
@@ -158,7 +168,10 @@ async def pick_best_briefing(
 
 
 async def reflect_on_briefing(
-    briefing: str, season: str, target: str
+    briefing: str,
+    season: str,
+    target: str,
+    brand_profile_block: str = "",
 ) -> dict:
     """Day-3 reflection: a critic LLM reads the picked briefing and returns
     {needs_revision: bool, issues: str}. Only one revision pass — no infinite loop."""
@@ -167,8 +180,10 @@ async def reflect_on_briefing(
         f"Today's date: {today}\n"
         f"Season: {season}\n"
         f"Target group: {target}\n"
-        f"Briefing draft:\n\n{briefing}"
     )
+    if brand_profile_block:
+        user += f"\n{brand_profile_block}\n\n"
+    user += f"Briefing draft:\n\n{briefing}"
     response = await generate_with_retry(
         model=MODEL,
         contents=user,
@@ -183,7 +198,11 @@ async def reflect_on_briefing(
 
 
 async def revise_briefing(
-    briefing: str, issues: str, season: str, target: str
+    briefing: str,
+    issues: str,
+    season: str,
+    target: str,
+    brand_profile_block: str = "",
 ) -> str:
     """Re-write the briefing addressing the critic's issues. One pass only."""
     today = date.today().isoformat()
@@ -191,6 +210,10 @@ async def revise_briefing(
         f"Today's date: {today}\n"
         f"Season: {season}\n"
         f"Target group: {target}\n"
+    )
+    if brand_profile_block:
+        user += f"\n{brand_profile_block}\n\n"
+    user += (
         f"Editor's flagged issues:\n{issues}\n\n"
         f"Current briefing draft to revise:\n\n{briefing}"
     )
@@ -282,32 +305,59 @@ async def run_synthesis_phase(
     target: str,
     outputs: list[dict],
     cross_cutting: list[str] | None = None,
+    on_stage: Callable[[str], None] | None = None,
+    brand_profile_block: str = "",
 ) -> tuple[str, dict]:
     """Phase 2: Tree-of-Thought synthesis (3 drafts -> picker) + image collection.
 
+    `on_stage` is fired with stage names ('drafts', 'picker', 'reflection',
+    'validator') as each completes, so the UI can light up step-by-step.
+    `brand_profile_block` is injected into every synthesis user-prompt so
+    the long-term memory shapes drafts, picker decision, reflection, and
+    revision consistently.
+
     Returns (winning_briefing, tot_info)."""
+    def _stage(name: str) -> None:
+        if on_stage is not None:
+            try:
+                on_stage(name)
+            except Exception:
+                pass
+
     draft_tasks = [
         asyncio.create_task(
-            synthesize(season, target, outputs, cross_cutting, angle=angle)
+            synthesize(
+                season, target, outputs, cross_cutting,
+                angle=angle, brand_profile_block=brand_profile_block,
+            )
         )
         for angle in SYNTHESIS_ANGLES
     ]
     drafts = await asyncio.gather(*draft_tasks)
+    _stage("drafts")
 
-    winner_idx, reason = await pick_best_briefing(drafts, season, target)
+    winner_idx, reason = await pick_best_briefing(
+        drafts, season, target, brand_profile_block=brand_profile_block,
+    )
     briefing = drafts[winner_idx]
+    _stage("picker")
 
     # Reflection: critic reads the picked briefing; if issues, one revision pass.
-    reflection = await reflect_on_briefing(briefing, season, target)
+    reflection = await reflect_on_briefing(
+        briefing, season, target, brand_profile_block=brand_profile_block,
+    )
     revised_briefing: str | None = None
     if reflection["needs_revision"] and reflection["issues"]:
         revised_briefing = await revise_briefing(
-            briefing, reflection["issues"], season, target
+            briefing, reflection["issues"], season, target,
+            brand_profile_block=brand_profile_block,
         )
         briefing = revised_briefing
+    _stage("reflection")
 
     candidate_gallery = collect_gallery_images(outputs)
     gallery_images = await _validate_gallery(briefing, target, candidate_gallery)
+    _stage("validator")
 
     tot_info = {
         "drafts": drafts,
@@ -335,12 +385,16 @@ async def run_briefing(
     agent_specs: list[tuple[str, str, list[str] | None]],
     cross_cutting: list[str] | None = None,
     max_rounds: int = MAX_AGENT_ROUNDS,
+    on_synthesis_stage: Callable[[str], None] | None = None,
+    brand_profile_block: str = "",
 ) -> tuple[str, list[dict], dict]:
     """Top-level pipeline: research phase → synthesis phase."""
     outputs = await run_research_phase(
         season, target, agent_specs, on_agent_done, max_rounds=max_rounds
     )
     briefing, tot_info = await run_synthesis_phase(
-        season, target, outputs, cross_cutting
+        season, target, outputs, cross_cutting,
+        on_stage=on_synthesis_stage,
+        brand_profile_block=brand_profile_block,
     )
     return briefing, outputs, tot_info

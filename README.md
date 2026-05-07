@@ -56,6 +56,20 @@ copy .env.example .env
 # .env öffnen, GEMINI_API_KEY eintragen
 ```
 
+### Optional: Gmail SMTP für echten Mail-Versand
+
+Wenn du den Share-Dialog für echten Mail-Versand nutzen willst (statt Dummy):
+
+1. Google-Account → Security → 2-Faktor-Authentifizierung aktivieren
+2. https://myaccount.google.com/apppasswords → "Mail" → 16-stelliges App-Passwort generieren
+3. In `.env` eintragen:
+   ```
+   SMTP_USER=deine-adresse@gmail.com
+   SMTP_PASSWORD=xxxxxxxxxxxxxxxx   # das App-Passwort, NICHT dein Gmail-Passwort
+   ```
+
+Ohne diese beiden Variablen bleibt der Send-Button im Dummy-Modus — die Mails werden gedraftet und angezeigt, aber nicht versendet. Toast unterscheidet ehrlich (`via smtp.gmail.com` vs `no SMTP configured`).
+
 ## Starten
 
 ```powershell

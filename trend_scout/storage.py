@@ -1,9 +1,15 @@
 """Persistent briefing history under ~/.trend-scout/history/.
 
 Each briefing run is JSON-dumped with full state (briefing, agent outputs,
-tot_info, run_stats, plan). Sidebar can list past runs and reload them; the
-cache lookup uses a hash over (season, target, agent_specs) to detect repeat
-queries and serve the previous briefing without re-hitting the API.
+tot_info, run_stats, plan, enabled_agents). The pre-built PDF lives next
+to it as a separate binary file (`<run_id>.pdf`) so the JSON stays compact
+and reload-from-history is instant — no PDF re-build, no image re-fetch.
+
+Sidebar lists past runs and reloads them. The cache lookup matches directly
+on the canonicalized fields (season, target, mode) — robust to schema
+changes in input_hash and to records saved before mode-tracking existed.
+The stored `input_hash` is kept for forensics / debugging only, not used
+for matching.
 """
 from __future__ import annotations
 
@@ -51,8 +57,12 @@ def save_run(
     plan: dict,
     enabled_agents: list[str],
     input_hash: str,
+    pdf_bytes: bytes | None = None,
 ) -> str:
-    """Dump a run to disk. Returns the run id (filename stem)."""
+    """Dump a run to disk. Returns the run id (filename stem).
+
+    If `pdf_bytes` is provided, also writes `<run_id>.pdf` next to the JSON
+    so reload-from-history can serve the same PDF without rebuilding."""
     HISTORY_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_id = f"{ts}_{_slug(season)}_{_slug(target)}"
@@ -71,6 +81,11 @@ def save_run(
     }
     path = HISTORY_DIR / f"{run_id}.json"
     path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+    if pdf_bytes:
+        try:
+            (HISTORY_DIR / f"{run_id}.pdf").write_bytes(pdf_bytes)
+        except Exception:
+            pass  # PDF is best-effort, JSON record is what matters
     return run_id
 
 
@@ -102,14 +117,26 @@ def list_runs(limit: int = 20) -> list[dict]:
 
 
 def load_run(run_id: str) -> dict | None:
-    """Load a full run by id. Returns None if missing or unreadable."""
+    """Load a full run by id (briefing JSON + sibling PDF if present).
+    Returns None if missing or unreadable. The PDF lives in `pdf_bytes`
+    on the returned dict and is None for legacy records without one."""
     path = HISTORY_DIR / f"{run_id}.json"
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
+
+    pdf_path = HISTORY_DIR / f"{run_id}.pdf"
+    if pdf_path.exists():
+        try:
+            data["pdf_bytes"] = pdf_path.read_bytes()
+        except Exception:
+            data["pdf_bytes"] = None
+    else:
+        data["pdf_bytes"] = None
+    return data
 
 
 def find_cached(season: str, target: str, mode: str) -> dict | None:
@@ -132,8 +159,16 @@ def find_cached(season: str, target: str, mode: str) -> dict | None:
 
 
 def delete_run(run_id: str) -> bool:
-    path = HISTORY_DIR / f"{run_id}.json"
-    if path.exists():
-        path.unlink()
-        return True
-    return False
+    """Delete the JSON record and any sibling PDF file."""
+    deleted = False
+    json_path = HISTORY_DIR / f"{run_id}.json"
+    if json_path.exists():
+        json_path.unlink()
+        deleted = True
+    pdf_path = HISTORY_DIR / f"{run_id}.pdf"
+    if pdf_path.exists():
+        try:
+            pdf_path.unlink()
+        except Exception:
+            pass
+    return deleted

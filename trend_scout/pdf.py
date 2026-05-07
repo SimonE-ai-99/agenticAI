@@ -215,7 +215,13 @@ def _color_swatch_table(body: str, styles: dict) -> Table | None:
 
 def _fetch_image_sync(url: str, timeout: float = 4.0) -> bytes | None:
     """Sync httpx fetch — reportlab is sync, so we do the same here.
-    Hard timeout, swallow all errors, return None on failure."""
+    Hard timeout, swallow all errors, return None on failure.
+
+    Mime-type filter mirrors `llm.fetch_image_bytes` (jpeg/png/webp/heic/heif)
+    so an image that survived the moodboard validator can also reach the PDF.
+    Pillow handles jpeg/png/webp natively; heic/heif need pillow-heif which
+    is optional — if reportlab's Image() can't decode, the entry is silently
+    skipped in `_gallery_table`."""
     try:
         with httpx.Client(headers=_BROWSER_HEADERS, timeout=timeout) as c:
             r = c.get(url, follow_redirects=True)
@@ -227,7 +233,7 @@ def _fetch_image_sync(url: str, timeout: float = 4.0) -> bytes | None:
             mime = r.headers.get("content-type", "").split(";")[0].strip().lower()
             if not mime.startswith("image/"):
                 return None
-            if mime not in {"image/jpeg", "image/png", "image/webp"}:
+            if mime not in {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"}:
                 return None
             return data
     except Exception:

@@ -31,6 +31,34 @@ INPUT_VALIDATOR_SYSTEM = (
 )
 
 
+AGENT_GENERATOR_SYSTEM = (
+    "You design custom-research-agent specifications for a fashion trend "
+    "briefing tool. The user gives you a domain (e.g. 'Sustainability', "
+    "'Material Innovation', 'Regional Markets — Korea', 'Y2K Streetwear'). "
+    "You produce two things, calibrated to that domain:\n\n"
+    "1. A SYSTEM PROMPT for the agent (3-5 sentences). Define the role, "
+    "the preferred sources / authorities (publications, brand sites, trade "
+    "bodies, certifications), and the kind of evidence each finding must "
+    "anchor to (named designers, brands, certifications, hashtags, "
+    "materials, regions, etc.). Be domain-specific, not generic.\n\n"
+    "2. Three CONCRETE RESEARCH ANGLES. Each angle must be specific enough "
+    "that web search returns evidence — anchor to named entities where "
+    "possible (designers, brands, certifications, regions, hashtags). "
+    "No abstract themes alone.\n\n"
+    "If a brand profile is provided, calibrate both the prompt and the "
+    "angles to that brand's positioning and target customer.\n\n"
+    "Output EXACTLY this JSON, no preamble, no markdown fences:\n\n"
+    '{\n'
+    '  "prompt": "You are a [domain] analyst …",\n'
+    '  "angles": [\n'
+    '    "specific angle 1 with named entities",\n'
+    '    "specific angle 2",\n'
+    '    "specific angle 3"\n'
+    '  ]\n'
+    '}'
+)
+
+
 MAIL_AGENT_SYSTEM = (
     "You are a Communications Specialist drafting follow-up emails after a "
     "fashion trend briefing has been finalized. You receive the briefing text, "
@@ -48,6 +76,10 @@ MAIL_AGENT_SYSTEM = (
     "- Other / unclear roles: write a balanced version covering all four sections.\n\n"
     "Tone: professional, concise, no buzzword salad. Greet by first name. Sign "
     "off generically (the user will personalize). 120-200 words per email body.\n\n"
+    "Note: the full briefing will be attached as a PDF to every email. End each "
+    "body with a one-line cue that points to the attached PDF in the requested "
+    "language (e.g. EN: 'Full briefing attached as PDF.', DE: 'Vollständiges "
+    "Briefing im Anhang als PDF.').\n\n"
     "Output format — EXACTLY this JSON, one object per recipient in the same "
     "order they were given, no preamble, no markdown fences:\n\n"
     '[\n'

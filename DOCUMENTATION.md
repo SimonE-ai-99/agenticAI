@@ -140,6 +140,8 @@ Eight LLM-driven roles, each with its own system prompt. They share the same Gem
 | **Reflection Critic** | `REFLECTION_CRITIC_SYSTEM` | none | Read the picked briefing and decide if a revision pass is needed |
 | **Reflection Reviser** | `REFLECTION_REVISER_SYSTEM` | none | Rewrite the briefing addressing the critic's flagged issues — only if needed |
 | **Gallery Validator** (multimodal) | `GALLERY_VALIDATOR_SYSTEM` | image input | Filter the moodboard pool — accept editorial/lookbook visuals, reject logos/UI/banners |
+| **Input Guardrail** | `INPUT_VALIDATOR_SYSTEM` | none | Day-3 LLM-judge that gates the pipeline against gibberish, off-topic, or prompt-injection inputs |
+| **Mail Agent** | `MAIL_AGENT_SYSTEM` | none | Drafts role-tailored follow-up emails (one per recipient) after the briefing is finalized; gated behind a HITL approval before SMTP send |
 
 ### The agents
 
@@ -276,6 +278,7 @@ For the course demo: local. For wider use:
 | **No retry on agent failure** | A failed agent fails the whole run. Fast-fail preferred over silent partial results for demos. |
 | **No caching layer** | Repeated identical runs hit the API again. Deliberately omitted to keep behaviour predictable. |
 | **Event-loop reuse on Windows** | Streamlit's `asyncio.run()` per phase requires per-loop client reinitialisation; handled in `llm.get_client()`. |
+| **SMTP send is opt-in** | The Share dialog drafts emails on every run; actual SMTP delivery requires `SMTP_USER` + `SMTP_PASSWORD` in `.env` (Gmail needs a 16-char App password). Without those credentials the action stays in dummy mode and the toast says so explicitly. |
 
 ---
 
