@@ -85,6 +85,16 @@ footer,
 }
 [data-testid="stSidebar"] input { border-radius: 0 !important; }
 
+/* History-Liste in der Sidebar: kompakter Text, gedaempfter Subtitle */
+.ts-history-meta {
+    font-size: 0.65rem;
+    line-height: 1.4;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    opacity: 0.5;
+    margin: -0.4rem 0 0.85rem 0.1rem;
+}
+
 /* Buttons: konsistent dunkel mit hellem Text — in beiden Modi lesbar.
    Theme-aware Inversion ist mit Streamlit-CSS-only nicht zuverlaessig moeglich. */
 .stButton button {

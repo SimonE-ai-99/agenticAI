@@ -1,12 +1,17 @@
-"""Gemini client + retry wrapper + grounding-citation extraction + OG-image enrichment."""
+"""Gemini client + retry wrapper + grounding-citation extraction +
+OG-image enrichment + input guardrail."""
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from urllib.parse import urlparse
 
 import httpx
 from google import genai
+from google.genai import types
+
+from .prompts import INPUT_VALIDATOR_SYSTEM
 
 
 _client: genai.Client | None = None
@@ -190,6 +195,45 @@ async def enrich_citations(citations: list[dict]) -> list[dict]:
         )
         enriched.append({**c, "url": final_url, "image": img, "title": merged_title})
     return enriched
+
+
+async def validate_input(season: str, target: str, model: str) -> dict:
+    """Day-3 input guardrail: ask a small LLM-judge to decide whether the
+    user-supplied (season, target) pair is a legitimate fashion-research
+    request before we burn the multi-agent pipeline on it.
+
+    Returns {"valid": bool, "reason": str}. Network or parsing failures
+    fail OPEN (valid=True) — the guardrail is best-effort, not a hard gate."""
+    user = (
+        f"season: {season!r}\n"
+        f"target group: {target!r}"
+    )
+    try:
+        response = await generate_with_retry(
+            model=model,
+            contents=user,
+            config=types.GenerateContentConfig(
+                system_instruction=INPUT_VALIDATOR_SYSTEM,
+                temperature=0.1,
+                response_mime_type="application/json",
+            ),
+        )
+    except Exception:
+        return {"valid": True, "reason": ""}
+
+    text = (response.text or "").strip()
+    if text.startswith("```"):
+        # Strip accidental markdown fences if the model added them.
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.MULTILINE).strip()
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return {"valid": True, "reason": ""}
+
+    return {
+        "valid": bool(parsed.get("valid", True)),
+        "reason": str(parsed.get("reason", "")).strip(),
+    }
 
 
 async def fetch_image_bytes(url: str, max_bytes: int) -> tuple[bytes, str] | None:
