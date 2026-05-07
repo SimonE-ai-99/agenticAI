@@ -11,7 +11,7 @@ import httpx
 from google import genai
 from google.genai import types
 
-from .prompts import INPUT_VALIDATOR_SYSTEM
+from .prompts import AGENT_GENERATOR_SYSTEM, INPUT_VALIDATOR_SYSTEM
 
 
 _client: genai.Client | None = None
@@ -233,6 +233,52 @@ async def validate_input(season: str, target: str, model: str) -> dict:
     return {
         "valid": bool(parsed.get("valid", True)),
         "reason": str(parsed.get("reason", "")).strip(),
+    }
+
+
+async def generate_agent_spec(
+    domain: str,
+    model: str,
+    brand_profile_block: str = "",
+) -> dict:
+    """Build a custom-agent system prompt + 3 research angles from a domain
+    string. Used by the Plan-Review UI when the user adds a custom agent —
+    one click and the prompt + angles are pre-filled, calibrated to the
+    optional brand profile.
+
+    Returns {"prompt": str, "angles": list[str]}. Falls back to empty values
+    on network or parse errors so the UI can keep going (user can write
+    them by hand)."""
+    user = f"Domain: {domain}\n"
+    if brand_profile_block:
+        user += f"\n{brand_profile_block}\n"
+    user += "\nGenerate the agent specification."
+
+    response = await generate_with_retry(
+        model=model,
+        contents=user,
+        config=types.GenerateContentConfig(
+            system_instruction=AGENT_GENERATOR_SYSTEM,
+            temperature=0.4,
+            response_mime_type="application/json",
+        ),
+    )
+
+    text = (response.text or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.MULTILINE).strip()
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return {"prompt": "", "angles": []}
+
+    return {
+        "prompt": str(parsed.get("prompt", "")).strip(),
+        "angles": [
+            str(a).strip()
+            for a in (parsed.get("angles") or [])
+            if str(a).strip()
+        ],
     }
 
 

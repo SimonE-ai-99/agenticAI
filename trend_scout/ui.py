@@ -96,8 +96,10 @@ footer,
 }
 
 /* Buttons: konsistent dunkel mit hellem Text — in beiden Modi lesbar.
-   Theme-aware Inversion ist mit Streamlit-CSS-only nicht zuverlaessig moeglich. */
-.stButton button {
+   stDownloadButton wird genauso gestyled wie stButton, damit die zwei nebeneinander
+   gestellten Buttons im Briefing-Header (Share + PDF export) identisch aussehen. */
+.stButton button,
+.stDownloadButton button {
     border-radius: 0 !important;
     font-weight: 500 !important;
     text-transform: uppercase !important;
@@ -110,8 +112,17 @@ footer,
 }
 .stButton button p,
 .stButton button span,
-.stButton button div {
+.stButton button div,
+.stDownloadButton button p,
+.stDownloadButton button span,
+.stDownloadButton button div {
     color: #FAFAF7 !important;
+}
+/* Disabled state: greyed out but keeps the same shape. */
+.stButton button:disabled,
+.stDownloadButton button:disabled {
+    opacity: 0.45 !important;
+    cursor: not-allowed !important;
 }
 
 /* Tabs */
@@ -296,6 +307,7 @@ def add_custom_agent() -> None:
     st.session_state.custom_agents.append({
         "id": cid,
         "name": f"CustomAgent{cid + 1}",
+        "domain": "",
         "prompt": CUSTOM_AGENT_PROMPT_TEMPLATE,
         "queries_text": "",
     })
