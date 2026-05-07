@@ -1,6 +1,6 @@
 # Trend Scout
 
-Multi-Agent Trend-Briefing-Generator für DRYKORN. Streamlit + Gemini.
+Multi-Agent Trend-Briefing-Generator. Streamlit + Gemini.
 
 ## Was es macht
 
